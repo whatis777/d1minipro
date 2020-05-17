@@ -7,8 +7,10 @@ import dht
 CONFIG_FILE_NAME = "config.json"
 # configuration object parsed from CONFIG_FILE_NAME
 config = None
+mqttClient = None
 
-pin = machine.Pin(2, machine.Pin.OUT)    # create output pin on GPIO2
+pin2 = machine.Pin(2, machine.Pin.OUT)    # Embedded LED on GPIO2
+pin14 = machine.Pin(14, machine.Pin.OUT)    # Status LED on on GPIO14
 dht22 = dht.DHT22(machine.Pin(4))
 
 
@@ -37,7 +39,7 @@ def loadConfig():
 # Connects the device to a WLAN according to the properties
 # in the configuration object
 # ----------------------------------------------------------
-def doConnect(config):
+def wlanConnect(config):
     import network
     wlan = network.WLAN(network.STA_IF)
     wlan.active(True)
@@ -57,40 +59,77 @@ def doConnect(config):
 # Performs measurements of the given DHT22 reference.
 # Must not be called more thn once every 2 seconds (DHT22 restriction)
 # ----------------------------------------------------------
-def measureDHT22(dht22):
+def processDHT22(config, dht22):
     dht22.measure()
     temperature = dht22.temperature()
     humidity = dht22.humidity()
-    print("temperature=", temperature)
-    print("humidity=", humidity)
+
+    temperatureTopic = 'device/{}/temperature'.format(getClientId()).encode()
+    humidityTopic = 'device/{}/humidity'.format(getClientId()).encode()
+
+    mqttPublish(config, temperatureTopic, temperature)
+    mqttPublish(config, humidityTopic, humidity)
+
+
+# ----------------------------------------------------------
+# Connects to an MQTT broker according to given MQTT configuration
+# ----------------------------------------------------------
+def mqttConnect(config):
+    from umqtt.robust import MQTTClient
+
+    # extract properties from JSON-parsed configuration
+    brokerHost = str(config['mqtt']['brokerHost'])
+    brokerPort = int(config['mqtt']['brokerPort'])
+    print('Connecting to broker {}:{} as client ID={}'.format(brokerHost, brokerPort, getClientId()))
+
+    global mqttClient
+    mqttClient = MQTTClient(getClientId(), brokerHost, brokerPort)
+    mqttClient.connect()
+
+
+# ----------------------------------------------------------
+# Connects to an MQTT broker according to given MQTT configuration
+# ----------------------------------------------------------
+def mqttDisconnect():
+    mqttClient.disconnect()
+
 
 # ----------------------------------------------------------
 # Pusblishes data via MQTT according to given MQTT configuration
 # ----------------------------------------------------------
-def publishData(config, topic, data):
+def mqttPublish(config, topic, data):
+    print('Publishing data as client=', getClientId())
+
+    mqttClient.publish(topic, str(data))
+
+
+def getClientId():
     import ubinascii
-    from umqtt.robust import MQTTClient
-    CLIENT_ID = ubinascii.hexlify(machine.unique_id())
-    print('Publishing data as client=', CLIENT_ID)
+    return ubinascii.hexlify(machine.unique_id())
 
-    brokerHost = str(config['mqtt']['brokerHost'])
-    brokerPort = int(config['mqtt']['brokerPort'])
-
-    mqtt = MQTTClient(CLIENT_ID, brokerHost, brokerPort)
-    mqtt.connect()
-    mqtt.publish('device/{}'.format(CLIENT_ID).encode(), '123.4')
-    mqtt.disconnect()
 
 # ----------------------------------------------------------
 # MAIN / Entry point
 # ----------------------------------------------------------
 
+# initialize status LED with 0
+pin14.off()
+
+# Load JSON configuration file
 config = loadConfig()
-doConnect(config)
+
+# Connect to WLAN
+wlanConnect(config)
+
+# set status LED to on
+pin14.on()
 
 while True:
-    pin.on()
-    #publishData(config)
-    measureData(dht22)
-    pin.off()
-    time.sleep(5)
+    pin2.on()
+
+    mqttConnect(config)
+    processDHT22(config, dht22)
+    mqttDisconnect()
+
+    pin2.off()
+    time.sleep(10)
