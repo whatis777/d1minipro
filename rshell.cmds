@@ -1,0 +1,11 @@
+# macro with commands to be executed by rshell.
+# This will upload the application files and start the MicroPython application.
+# Run it with: rshell --port /dev/ttyUSB0 --file rshell.cmds
+
+# 1. upload the application files:
+cp src/boot.py /boot.py
+cp src/main.py /main.py
+cp config.json /config.json
+
+# 2. start REPL and reset the machine so that main.py is executed and the print() messages are visible in the console:
+repl ~ import machine ~ machine.reset()
